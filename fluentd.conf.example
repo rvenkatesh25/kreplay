@@ -1,0 +1,80 @@
+<source>
+  @type  tail
+  @id    input2
+  tag pg.raw
+  path /Users/venky/.local/yoda/work/logs/postgres/*.csv
+  format multiline
+  time_key log_time
+  time_format %Y-%m-%d %H:%M:%S.%L %Z
+
+  format_firstline /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} UTC,/
+  format1 /^(?<log_time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} UTC),/
+  format2 /(?<quote>")?(?<user_name>\w*)(?(<quote>)\k<quote>|),/
+  format3 /(?<quote>")?(?<database_name>\w*)(?(<quote>)\k<quote>|),/
+  format4 /(?<process_id>\d+),/
+  format5 /(?<quote>")?(?<connection_from>.*?)(?(<quote>)\k<quote>|),/
+  format6 /(?<session_id>[0-9a-z\.]+),/
+  format7 /(?<session_line_num>\d+),/
+  format8 /(?<quote>")?(?<command_tag>.*?)(?(<quote>)\k<quote>|),/
+  format9 /(?<session_start_time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC),/
+  format10 /(?<virtual_transaction_id>[0-9\/]*),/
+  format11 /(?<transaction_id>\d+),/
+  format12 /(?<error_severity>\w+),/
+  format13 /(?<sql_state_code>\w+),/
+  format14 /"((duration: (?<duration>\d+\.\d+) ms\s+statement: (\/\* run_id:(?<run_id>.*?) (?<source>.*?) \*\/ (?<statement>.*?)|(?<statement>.*?)))|(?<statement>.*?))",/
+  format15 /(?<detail>.*?),/
+  format16 /(?<hint>.*?),/
+  format17 /(?<internal_query>.*?),/
+  format18 /(?<internal_query_pos>.*?),/
+  format19 /(?<context>.*?),/
+  format20 /(?<query>.*?),(?<query_pos>.*?),(?<location>.*?),"(?<application_name>.*?)"$/
+
+  read_from_head true
+  refresh_interval 1
+
+  pos_file /Users/venky/development/fluentd/pg.raw.pos 
+</source>
+
+<match pg.queries>
+  @type file
+  @id   output1
+  path         /Users/venky/development/fluentd/output/fluentd_output.*.log
+  symlink_path /Users/venky/development/fluentd/output/fluentd_output.log
+  append       true
+  time_slice_format %Y%m%d
+  time_slice_wait   10m
+  time_format       %Y%m%dT%H%M%S%z
+</match>
+
+<filter pg.raw>
+  @type record_transformer
+  enable_ruby
+  
+  # quote only exists to match double-quotes on the CSV record; we can
+  # drop it here
+  remove_keys quote
+  
+  <record>
+    topic ${record["database_name"].nil? || record["database_name"].strip.empty? ? "pg_raw_unmatched" : "pg_raw_" + record["database_name"]}
+    partition_key ${record["session_id"]}
+  </record>
+</filter>
+
+<match pg.raw>
+  @type kafka_buffered
+  @id   output2
+
+  brokers localhost:9092
+
+  buffer_type file
+  buffer_path /Users/venky/development/fluentd/buffer/td
+  flush_interval 3s
+
+  default_topic pg_raw_unmatched
+
+  output_data_type msgpack
+  compression_codec gzip
+
+  max_send_retries 3
+  required_acks 1
+</match>
