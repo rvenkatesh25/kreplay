@@ -1,3 +1,5 @@
+import argparse
+import signal
 import sys
 import time
 
@@ -95,6 +97,10 @@ class KReplay:
             db_port=5432,
             skip_selects=True,
             session_timeout_ms=60000):
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+        self.terminate = False
+
         self.skip_selects = skip_selects
         self.session_timeout_ms = session_timeout_ms
         self.kafka_receiver = KafkaReceiver(topic, kafka_brokers)
@@ -104,11 +110,13 @@ class KReplay:
         self.processors = {}  # hash: partition => PartitionProcessor
         self.committed_offsets = {}  # hash: partition => committed offset
 
+    def exit_gracefully(self, signum, frame):
+        self.terminate = True
+
     def run(self):
-        terminate = False
         err = False
 
-        while not terminate and not err:
+        while not self.terminate and not err:
             # fetch messages from kafka
             records = self.kafka_receiver.get_next_records()
 
@@ -139,9 +147,23 @@ class KReplay:
         return err
 
 if __name__ == '__main__':
-    app = KReplay(topic='pg_raw_thumbtack', kafka_brokers=['localhost:9092'], db_name='thumbtack',
-                  db_user='venky', db_host='localhost', db_port=5434)
+    parser = argparse.ArgumentParser(description='Replay postgres query streams from Kafka')
+    parser.add_argument('-t', '--topic', default='pg_raw_unmatched')
+    parser.add_argument('-b', '--brokers', default=[], action='append')
+    parser.add_argument('-d', '--db-name', default='postgres')
+    parser.add_argument('-u', '--db-user', default='postgres')
+    parser.add_argument('-p', '--db-password', default='')
+    parser.add_argument('-H', '--db-host', default='localhost')
+    parser.add_argument('-P', '--db-port', default=5432)
+
+    args = parser.parse_args()
+
+    app = KReplay(topic=args.topic, kafka_brokers=args.brokers,
+                  db_name=args.db_name, db_user=args.db_user, db_pass=args.db_password,
+                  db_host=args.db_host, db_port=args.db_port)
     error = app.run()
     if error:
         sys.exit(1)
 
+    Log.info('Shutting down kreplay')
+    sys.exit(0)
