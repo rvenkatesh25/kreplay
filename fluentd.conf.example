@@ -1,10 +1,9 @@
 <source>
   @type  tail
-  @id    input2
+  @id    input1
   tag pg.raw
   path /Users/venky/.local/yoda/work/logs/postgres/*.csv
   format multiline
-  time_key log_time
   time_format %Y-%m-%d %H:%M:%S.%L %Z
 
   format_firstline /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} UTC,/

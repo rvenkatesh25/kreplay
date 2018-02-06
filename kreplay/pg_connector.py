@@ -1,15 +1,16 @@
 import psycopg2
-import re
 
 from retrying import retry
-from utils import Log
+from utils import Log, now
 
 
 class PGConnector:
-    def __init__(self, db_name, db_user, db_pass, db_host, db_port):
+    def __init__(self, db_name, db_user, db_pass, db_host, db_port, ignore_error_seconds):
         self.connection_string = 'dbname={} user={} password={} host={} port={}'.format(
             db_name, db_user, db_pass, db_host, db_port
         )
+        self.first_timestamp = 0
+        self.ignore_error_seconds = ignore_error_seconds
         self.connections = {}  # hash: session_id => connection
         pass
 
@@ -27,6 +28,8 @@ class PGConnector:
         if session_id not in self.connections or self.connections[session_id] is None:
             try:
                 self._connect(session_id)
+                if self.first_timestamp == 0:
+                    self.first_timestamp = now()
             except Exception as e:
                 Log.error('Error closing connection for session {}\n{}'.format(session_id, e))
                 return False
@@ -36,7 +39,7 @@ class PGConnector:
             Log.info('Will replay query: {} w/ session {}'.format(query, session_id))
             self._execute(session_id, query)
         except Exception as e:
-            if isinstance(e, psycopg2.IntegrityError):
+            if isinstance(e, psycopg2.IntegrityError) and self._can_ignore_error():
                 Log.warn('SKIPPING: Statement violates constraint: {}\n{}'.format(statement, e))
             else:
                 Log.error('Error executing statement: {}\n{}: {}'.format(
@@ -44,6 +47,9 @@ class PGConnector:
                 self._close(session_id)
                 return False
         return True
+
+    def _can_ignore_error(self):
+        return now() - self.first_timestamp < self.ignore_error_seconds
 
     @staticmethod
     def cleanup_statement(statement):
