@@ -1,4 +1,3 @@
-import argparse
 import signal
 import sys
 
@@ -160,55 +159,3 @@ class KReplay:
                         self.committed_offsets[partition] = offset
 
         return err
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Replay postgres query streams from Kafka')
-    parser.add_argument('-t', '--topic', default='pg_raw_unmatched',
-                        help='Kafka topic to consume from')
-    parser.add_argument('-b', '--brokers', default=[], action='append',
-                        help='Broker host:port, can be repeated')
-    parser.add_argument('-d', '--db-name', default='postgres',
-                        help='Name of the database to replay queries to')
-    parser.add_argument('-u', '--db-user', default='postgres',
-                        help='Username to connect to db')
-    parser.add_argument('-p', '--db-password', default='',
-                        help='Password to connect to db')
-    parser.add_argument('-H', '--db-host', default='localhost',
-                        help='DB hostname to connect to')
-    parser.add_argument('-P', '--db-port', default=5432,
-                        help='DB port to connect to')
-    parser.add_argument('-s', '--skip-selects', default=True, action='store',
-                        help='Do not replay select queries')
-    parser.add_argument('-m', '--timeout-ms', default=60000,
-                        help='Close lingering replay connection after this many milliseconds')
-    parser.add_argument('-a', '--after', default=0,
-                        help='Unix timestamp past which the queries will be replayed. '
-                             'Setting to 0 disables this option (replay all)')
-    parser.add_argument('-i', '--ignore-error-seconds', default=0,
-                        help='Tolerate integrity errors for this many seconds. Can be useful when '
-                             'the exact log line after a snapshot is not known, so for a few '
-                             'seconds duplicate key sort of errors should be ignored.'
-                             'Setting to -1 tolerates errors forever. '
-                             'Setting to 0 fails on any error')
-
-    args = parser.parse_args()
-
-    app = KReplay(
-        topic=args.topic,
-        kafka_brokers=args.brokers,
-        db_name=args.db_name,
-        db_user=args.db_user,
-        db_pass=args.db_password,
-        db_host=args.db_host,
-        db_port=args.db_port,
-        skip_selects=args.skip_selects,
-        session_timeout_ms=args.timeout_ms,
-        after=args.after,
-        ignore_error_seconds=args.ignore_error_seconds,
-    )
-    error = app.run()
-    if error:
-        sys.exit(1)
-
-    Log.info('Shutting down kreplay')
-    sys.exit(0)
