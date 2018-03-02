@@ -1,10 +1,13 @@
 #! /usr/bin/env python
 import argparse
+import logging
 import os
 import sys
 import SimpleHTTPServer
 import SocketServer
+
 from kreplay import KReplay
+from monitoring import KreplayMonitoringClient
 from threading import Thread
 
 
@@ -18,11 +21,20 @@ def health_check():
     httpd = SocketServer.TCPServer(("", port), SimpleHTTPServer.SimpleHTTPRequestHandler)
     httpd.serve_forever()
 
+
+def init_logging():
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(ch)
+
+
 if __name__ == '__main__':
-    # spawn a background thread for health checks
-    hc_thread = Thread(target=health_check, args=())
-    hc_thread.daemon = True
-    hc_thread.start()
+    init_logging()
 
     parser = argparse.ArgumentParser(description='Replay postgres query streams from Kafka')
     parser.add_argument('-t', '--topic', default='pg_raw_unmatched',
@@ -78,7 +90,16 @@ if __name__ == '__main__':
     ignore_error_seconds = int(os.getenv('ignoreErrorSeconds')) if os.getenv(
         'ignoreErrorSeconds') is not None else args.ignore_error_seconds
 
+    # spawn a background thread for health checks
+    hc_thread = Thread(target=health_check, args=())
+    hc_thread.daemon = True
+    hc_thread.start()
+    
+    # start monitoring
+    metrics = KreplayMonitoringClient()
+
     app = KReplay(
+        metrics=metrics,
         topic=topic,
         kafka_brokers=brokers,
         db_name=db_name,

@@ -1,19 +1,22 @@
+import logging
 import signal
 import sys
+import time
 
 from dateutil.parser import parse
 from kafka_receiver import KafkaReceiver
 from pg_connector import PGConnector
-from utils import Log, now
 
 
 class _PartitionProcessor:
     def __init__(
             self,
+            metrics,
             pg_connector,
             skip_selects,
             session_timeout_ms,
             after):
+        self.metrics = metrics
         self.replay_commands = ['INSERT', 'DELETE', 'UPDATE', 'BREAK', 'COMMIT', 'ROLLBACK']
         self.pg_connector = pg_connector
         self.skip_selects = skip_selects
@@ -22,6 +25,7 @@ class _PartitionProcessor:
 
         self.session_timestamps = {}  # hash: session_id => timestamp of first statement
         self.last_seen_offset = None
+        self.logger = logging.getLogger(__name__)
 
     @staticmethod
     def is_valid_pg_message(pg_msg):
@@ -34,7 +38,7 @@ class _PartitionProcessor:
 
     def _replay(self, session_id, statement):
         if session_id not in self.session_timestamps:
-            self.session_timestamps[session_id] = now()
+            self.session_timestamps[session_id] = PGConnector.now()
         return self.pg_connector.replay(session_id, statement)
 
     def _close_connection(self, session_id):
@@ -63,17 +67,17 @@ class _PartitionProcessor:
 
     def prune_overdue_sessions(self):
         for session_id in self.session_timestamps.keys():
-            if now() - self.session_timestamps[session_id] \
+            if PGConnector.now() - self.session_timestamps[session_id] \
                     > self.session_timeout_ms:
-                Log.warn('Closing overdue conn for session {} [timeout of {}ms]'
-                         .format(session_id, self.session_timeout_ms))
+                self.logger.warn('Closing overdue conn for session {} [timeout of {}ms]'
+                                 .format(session_id, self.session_timeout_ms))
                 self._close_connection(session_id)
 
     def process(self, record):
         ret = True
         pg_msg = record.message
         if not _PartitionProcessor.is_valid_pg_message(pg_msg):
-            Log.warn('Invalid message received from Postgres: {}'.format(pg_msg))
+            self.logger.warn('Invalid message received from Postgres: {}'.format(pg_msg))
             return
 
         command_tag = pg_msg['command_tag'].upper()
@@ -97,6 +101,7 @@ class _PartitionProcessor:
 class KReplay:
     def __init__(
             self,
+            metrics,
             topic='pg_raw_unmatched',
             kafka_brokers=None,
             db_name='postgres',
@@ -111,17 +116,20 @@ class KReplay:
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
         self.terminate = False
-        
+
+        self.metrics = metrics
         self.skip_selects = skip_selects
         self.session_timeout_ms = session_timeout_ms
         self.after = after
-        self.kafka_receiver = KafkaReceiver(topic, kafka_brokers)
-        self.pg_connector = PGConnector(db_name=db_name, db_user=db_user, db_pass=db_pass,
-                                        db_host=db_host, db_port=db_port, 
+        self.kafka_receiver = KafkaReceiver(metrics, topic, kafka_brokers)
+        self.pg_connector = PGConnector(metrics=metrics, db_name=db_name, db_user=db_user,
+                                        db_pass=db_pass, db_host=db_host, db_port=db_port,
                                         ignore_error_seconds=ignore_error_seconds)
 
         self.processors = {}  # hash: partition => PartitionProcessor
         self.committed_offsets = {}  # hash: partition => committed offset
+        self.logger = logging.getLogger(__name__)
+        self.inactivity_sleep_seconds = 1
 
     def exit_gracefully(self, signum, frame):
         self.terminate = True
@@ -136,8 +144,9 @@ class KReplay:
             # process messages, replay on session end
             for record in records:
                 if record.partition not in self.processors:
-                    Log.info('Adding processor for partition: {}'.format(record.partition))
+                    self.logger.info('Adding processor for partition: {}'.format(record.partition))
                     self.processors[record.partition] = _PartitionProcessor(
+                        self.metrics,
                         self.pg_connector,
                         self.skip_selects,
                         self.session_timeout_ms,
@@ -145,7 +154,7 @@ class KReplay:
                     )
                     self.committed_offsets[record.partition] = 0
                 if not self.processors[record.partition].process(record):
-                    Log.error('Error encountered. Stopping')
+                    self.logger.error('Error encountered. Stopping')
                     err = True
                     break
 
@@ -154,8 +163,13 @@ class KReplay:
                 if processor.can_commit():
                     offset = processor.get_last_seen_offset()
                     if offset != self.committed_offsets[partition]:
-                        Log.debug('Committing offset {} for partition {}'.format(offset, partition))
+                        self.logger.debug(
+                            'Committing offset {} for partition {}'.format(offset, partition))
                         self.kafka_receiver.commit(partition, offset)
                         self.committed_offsets[partition] = offset
+
+            if len(records) == 0:
+                # nothing in the queue, take it easy
+                time.sleep(self.inactivity_sleep_seconds)
 
         return err
