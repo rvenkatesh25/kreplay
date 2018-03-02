@@ -11,14 +11,24 @@ KafkaRecord = collections.namedtuple('KafkaRecord', ['partition', 'offset', 'mes
 
 
 class KafkaReceiver:
+    """Kafka consumer client to fetch the messages that represent source
+    PG query logs
+
+    Arguments:
+        metrics (KreplayMonitoringClient): influxdb metrics object
+        topic (str): kafka topic to read queries from
+        kafka_brokers (str array): list of bootstrap brokers
+        max_records_per_get (int): kafka receive batch size
+        get_messages_timeout_ms (int): timeout after which the poll call returns even
+            if there are zero records to return
+    """
     def __init__(
             self,
             metrics,
             topic,
             kafka_brokers,
             max_records_per_get=100,
-            get_messages_timeout_ms=100,
-            max_retries=3):
+            get_messages_timeout_ms=100):
         self.metrics = metrics
         self.topic = topic
         self.max_records_per_get = max_records_per_get
@@ -42,6 +52,7 @@ class KafkaReceiver:
             raise e
     
     def get_next_records(self):
+        """Get the next batch of records from Kafka"""
         # infinite retries on connection errors, with exponential backoff
         # between 50ms to 1s
         # get_messages_timeout_ms it not honored on connection errors
@@ -67,6 +78,14 @@ class KafkaReceiver:
         return return_records
 
     def commit(self, partition, offset):
+        """Commit the given offset for the given partition - indicates that the
+        messages until this offset have been successfully replayed to the target postgres
+        instance
+
+        Arguments:
+            partition (int): kafka topic partition
+            offset (int): offset until which processing has been successful
+        """
         if offset is None:
             return
         try:
@@ -81,6 +100,7 @@ class KafkaReceiver:
         
     @staticmethod
     def is_valid_kafka_message(msg):
+        """Check if expected attributes are present in the message"""
         if hasattr(msg, 'value') and hasattr(msg, 'offset'):
             return True
         return False

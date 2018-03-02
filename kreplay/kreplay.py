@@ -9,6 +9,18 @@ from pg_connector import PGConnector
 
 
 class _PartitionProcessor:
+    """Replay messages from a single partition of source Kafka topic
+
+    Arguments:
+        metrics (KreplayMonitoringClient): influxdb metrics object
+        pg_connector (PGConnector): target postgres client object
+        skip_selects (boolean): should select queries be skipped during replay
+        session_timeout_ms (int): milliseconds after which a connection to the target
+            postgres host should be closed, if we don't see a disconnect message
+            from the stream in the meantime
+        after (int): timestamp before which the incoming messages will not be
+            considered for replay
+    """
     def __init__(
             self,
             metrics,
@@ -29,6 +41,11 @@ class _PartitionProcessor:
 
     @staticmethod
     def is_valid_pg_message(pg_msg):
+        """Check if all expected attributes exist in the message
+
+        Arguments:
+            pg_msg (object): postgres query json object
+        """
         if 'command_tag' in pg_msg and \
                 'statement' in pg_msg and \
                 'session_id' in pg_msg and \
@@ -37,11 +54,22 @@ class _PartitionProcessor:
         return False
 
     def _replay(self, session_id, statement):
+        """Replay statement on the connection specific to given session id
+
+        Arguments:
+            session_id (str): session id to identify the connection
+            statement (str): actual statement to be replayed
+        """
         if session_id not in self.session_timestamps:
             self.session_timestamps[session_id] = PGConnector.now()
         return self.pg_connector.replay(session_id, statement)
 
     def _close_connection(self, session_id):
+        """Close connection and remove session_id from dictionary
+
+        Arguments:
+            session_id (str): session identifier for the connection to be closed
+        """
         if session_id in self.session_timestamps:
             if not self.pg_connector.close_connection(session_id):
                 return False
@@ -49,6 +77,12 @@ class _PartitionProcessor:
         return True
 
     def _should_replay(self, command_tag, log_time):
+        """Checks if log line is ready for replay based on config params
+
+        Arguments:
+            command_tag (str): command field in the pg log
+            log_time (str): string representation of log time
+        """
         try:
             parsed_log_time = int(parse(log_time).strftime("%s"))
         except ValueError:
@@ -63,9 +97,19 @@ class _PartitionProcessor:
                 )
 
     def _should_end_session(self, command_tag, statement):
+        """Session can be ended if we see a disconnect message
+
+        Arguments:
+            command_tag (str): command field in the pg log
+            statement (str): actual pg statement
+        """
         return command_tag == 'IDLE' and 'disconnection' in statement
 
     def prune_overdue_sessions(self):
+        """Sessions lingering longer than timeout are force closed and purged from the
+        session_timestamps dictionary. This enables the replay program to keep
+        moving the consumer cursor forward
+        """
         for session_id in self.session_timestamps.keys():
             if PGConnector.now() - self.session_timestamps[session_id] \
                     > self.session_timeout_ms:
@@ -74,6 +118,11 @@ class _PartitionProcessor:
                 self._close_connection(session_id)
 
     def process(self, record):
+        """Process a given kafka record
+
+        Arguments:
+            record (KafkaRecord): a single message read from kafka
+        """
         ret = True
         pg_msg = record.message
         if not _PartitionProcessor.is_valid_pg_message(pg_msg):
@@ -92,13 +141,41 @@ class _PartitionProcessor:
         return ret
 
     def can_commit(self):
+        """It is safe to commit offset to kafka if there are no sessions in progress"""
         return len(self.session_timestamps) == 0
 
     def get_last_seen_offset(self):
+        """Public api to fetch the last seen offset"""
         return self.last_seen_offset
 
 
 class KReplay:
+    """Replay postgres queries from a Kafka topic to a target PG cluster
+
+    KReplay consumes query logs from a Kafka topic and replays it on the
+    configured target postgres master. The Kafka topic needs to be necessarily
+    configured with only one partition because only then it will be possible to
+    replay queries in the same order as they were logged in the WAL on the source
+    PG host.
+
+    Arguments:
+        metrics (KreplayMonitoringClient): influxdb metrics object
+        topic (str): kafka topic to read queries from
+        kafka_brokers (str array): list of bootstrap brokers
+        db_name (str): name of target database
+        db_user (str): user to replay query as
+        db_pass (str): password for the configured user
+        db_host (str): hostname for target database
+        db_port (int): port for target database
+        skip_selects (boolean): should select queries be skipped during replay
+        session_timeout_ms (int): milliseconds after which a connection to the target
+            postgres host should be closed, if we don't see a disconnect message
+            from the stream in the meantime
+        after (int): timestamp before which the incoming messages will not be
+            considered for replay
+        ignore_error_seconds (int): seconds for which referential integrity errors will
+            be ignored. After this duration, the program will fail hard on errors
+    """
     def __init__(
             self,
             metrics,
@@ -132,9 +209,16 @@ class KReplay:
         self.inactivity_sleep_seconds = 1
 
     def exit_gracefully(self, signum, frame):
+        """Signal handler for SIGINT and SIGTERM from os"""
         self.terminate = True
 
     def run(self):
+        """Main replay loop
+
+        Note:
+            A new _PartitionProcessor instance is created for each partition
+            seen in the source topic.
+        """
         err = False
 
         while not self.terminate and not err:
