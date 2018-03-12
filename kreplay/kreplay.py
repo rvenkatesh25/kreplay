@@ -48,8 +48,7 @@ class _PartitionProcessor:
         """
         if 'command_tag' in pg_msg and \
                 'statement' in pg_msg and \
-                'session_id' in pg_msg and \
-                'log_time' in pg_msg:
+                'session_id' in pg_msg:
             return True
         return False
 
@@ -223,7 +222,11 @@ class KReplay:
 
         while not self.terminate and not err:
             # fetch messages from kafka
-            records = self.kafka_receiver.get_next_records()
+            try:
+                records = self.kafka_receiver.get_next_records()
+            except Exception:
+                err = True
+                return err
 
             # process messages, replay on session end
             for record in records:

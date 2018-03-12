@@ -57,13 +57,19 @@ class KafkaReceiver:
         # between 50ms to 1s
         # get_messages_timeout_ms it not honored on connection errors
         start = datetime.now()
-        records = self.consumer.poll(
-            max_records=self.max_records_per_get,
-            timeout_ms=self.get_messages_timeout_ms
-        )
-        end = datetime.now()
-        self.metrics.measure(
-            KafkaConsumerLatencyMeasurement(self.topic, (end-start).total_seconds()))
+        try:
+            records = self.consumer.poll(
+                max_records=self.max_records_per_get,
+                timeout_ms=self.get_messages_timeout_ms
+            )
+        except Exception as e:
+            self.logger.error('Error fetching messages from Kafka: {}'.format(e.message))
+            self.metrics.measure(KafkaErrorsMeasurement(self.topic, 'ReceiveError'))
+            raise e
+        finally:
+            end = datetime.now()
+            self.metrics.measure(
+                KafkaConsumerLatencyMeasurement(self.topic, (end-start).total_seconds()))
 
         return_records = []
         for tp, msgs in records.items():

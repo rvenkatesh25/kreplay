@@ -26,6 +26,7 @@ import logging
 import math
 import multiprocessing
 import os
+import Queue
 import socket
 import threading
 import time
@@ -35,7 +36,6 @@ BUFFER_SIZE = 500
 FLUSH_TIME = 4
 RETRY_COUNT = 2
 TIMEOUT = 4
-DOMAIN = 'production.influxdb.thumbtack.com'
 
 
 def time_to_nanoseconds(now):
@@ -97,7 +97,7 @@ class InfluxDBBackendThread(threading.Thread):
                 while len(points) < BUFFER_SIZE:
                     wait = max(0, time.time() - last_write)
                     points.append(self.queue.get(True, wait))
-            except queue.Empty:
+            except Queue.Empty:
                 pass
             now = time.time()
             if len(points) >= BUFFER_SIZE or now >= last_write + FLUSH_TIME:
@@ -122,14 +122,15 @@ class InfluxDBBackend(object):
     """
     A backend for writing data to InfluxDB
 
+    :param str environment: The alfred environment 
     :param str database: The name of the database to write to
     :param str username: The user to write with
     :param str password: The password of the provided user
     """
-    def __init__(self, database, username, password):
+    def __init__(self, environment, database, username, password):
         self._logger = logging.getLogger(__name__)
-        endpoint = 'https://{}:8086/write?db={}&u={}&p={}&precision=n'.format(
-            DOMAIN,
+        endpoint = 'http://{}-influxdb:8086/write?db={}&u={}&p={}&precision=n'.format(
+            environment,
             urllib.quote(database),
             urllib.quote(username),
             urllib.quote(password)
@@ -143,7 +144,7 @@ class InfluxDBBackend(object):
         """Buffer a point for asynchronous flushing"""
         try:
             self._queue.put_nowait(point)
-        except queue.Full:
+        except Queue.Full:
             logging.warning('Failed to record metric data point: queue full')
 
     def close(self):
@@ -166,7 +167,7 @@ class ListBackend(object):
     def write(self, point):
         """Store a point in the local list"""
         self.data.append(point)
-        self._logger.info('Monitoring datapoint {}'.format(point))
+        self._logger.debug('Monitoring datapoint {}'.format(point))
 
     def contains(self, point):
         """Check if a point has been recorded"""
