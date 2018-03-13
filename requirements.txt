@@ -3,5 +3,5 @@ kafka-python==1.3.5
 psycopg2==2.6.2
 python-dateutil==2.6.1
 retrying==1.3.3
-msgpack==0.5.1
+u-msgpack-python==2.4.1
 urllib3==1.22

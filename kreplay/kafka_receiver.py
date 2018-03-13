@@ -1,6 +1,6 @@
 import collections
 import logging
-import msgpack
+import umsgpack
 
 from datetime import datetime
 from kafka import KafkaConsumer, OffsetAndMetadata, TopicPartition
@@ -42,7 +42,7 @@ class KafkaReceiver:
                 topic,
                 bootstrap_servers=kafka_brokers,
                 group_id=consumer_group,
-                value_deserializer=msgpack.loads,
+                value_deserializer=umsgpack.loads,
                 enable_auto_commit=False,
                 auto_offset_reset='latest',
             )
