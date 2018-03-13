@@ -42,11 +42,10 @@ class _PartitionProcessor:
     @staticmethod
     def is_valid_pg_message(pg_msg):
         """Check if all expected attributes exist in the message
-
-        Arguments:
-            pg_msg (object): postgres query json object
         """
-        if 'command_tag' in pg_msg and \
+
+        if isinstance(pg_msg, dict) and \
+                'command_tag' in pg_msg and \
                 'statement' in pg_msg and \
                 'session_id' in pg_msg:
             return True
@@ -91,7 +90,7 @@ class _PartitionProcessor:
         # enabled replay of logs after the timestamp self.after 
         # replay the DML commands and select command if skip selects is not true
         return (parsed_log_time >= self.after) and (
-                    (command_tag == 'SELECT' and not self.skip_selects) or
+                    (command_tag in ['SELECT', 'BIND', 'PARSE'] and not self.skip_selects) or
                     (command_tag in self.replay_commands)
                 )
 
@@ -126,7 +125,7 @@ class _PartitionProcessor:
         pg_msg = record.message
         if not _PartitionProcessor.is_valid_pg_message(pg_msg):
             self.logger.warn('Invalid message received from Postgres: {}'.format(pg_msg))
-            return
+            return ret
 
         command_tag = pg_msg['command_tag'].upper()
         session_id = pg_msg['session_id']
