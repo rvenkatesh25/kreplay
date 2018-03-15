@@ -45,8 +45,6 @@ if __name__ == '__main__':
                         help='Name of the database to replay queries to')
     parser.add_argument('-u', '--db-user', default='postgres',
                         help='Username to connect to db')
-    parser.add_argument('-p', '--db-password', default='',
-                        help='Password to connect to db')
     parser.add_argument('-H', '--db-host', default='localhost',
                         help='DB hostname to connect to')
     parser.add_argument('-P', '--db-port', default=5432,
@@ -78,7 +76,6 @@ if __name__ == '__main__':
 
     db_name = os.getenv('dbName') or args.db_name
     db_user = os.getenv('dbUser') or args.db_user
-    db_password = os.getenv('dbPassword') or args.db_password
     db_host = os.getenv('dbHost') or args.db_host
     db_port = int(os.getenv('dbPort')) if os.getenv('dbPort') is not None else args.db_port
     skip_selects = bool(os.getenv('skipSelects')) if os.getenv('skipSelects') is not None else \
@@ -104,7 +101,6 @@ if __name__ == '__main__':
         kafka_brokers=brokers,
         db_name=db_name,
         db_user=db_user,
-        db_pass=db_password,
         db_host=db_host,
         db_port=db_port,
         skip_selects=skip_selects,

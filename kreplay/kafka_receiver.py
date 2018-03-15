@@ -69,7 +69,7 @@ class KafkaReceiver:
         finally:
             end = datetime.now()
             self.metrics.measure(
-                KafkaConsumerLatencyMeasurement(self.topic, (end-start).total_seconds()))
+                KafkaConsumerLatencyMeasurement(self.topic, (end-start).total_seconds() * 1000))
 
         return_records = []
         for tp, msgs in records.items():
@@ -96,7 +96,7 @@ class KafkaReceiver:
             return
         try:
             self.consumer.commit({
-                TopicPartition(self.topic, partition): OffsetAndMetadata(offset, None)
+                TopicPartition(self.topic, partition): OffsetAndMetadata(offset+1, None)
             })
         except Exception as e:
             self.logger.error('Cannot commit offset {} for topic:partition {}:{}. Error: {}'

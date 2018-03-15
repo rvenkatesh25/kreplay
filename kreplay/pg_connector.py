@@ -22,11 +22,11 @@ class PGConnector:
         ignore_error_seconds (int): seconds for which referential integrity errors will
             be ignored. After this duration, the program will fail hard on errors
     """
-    def __init__(self, metrics, db_name, db_user, db_pass, db_host, db_port, ignore_error_seconds):
+    def __init__(self, metrics, db_name, db_user, db_host, db_port, ignore_error_seconds):
         self.metrics = metrics
         self.db_name = db_name
-        self.connection_string = 'dbname={} user={} password={} host={} port={}'.format(
-            db_name, db_user, db_pass, db_host, db_port
+        self.connection_string = 'dbname={} user={} host={} port={}'.format(
+            db_name, db_user, db_host, db_port
         )
         self.first_timestamp = 0
         self.ignore_error_seconds = ignore_error_seconds
@@ -62,11 +62,12 @@ class PGConnector:
             start = datetime.now()
             try:
                 self._connect(session_id)
+
                 if self.first_timestamp == 0:
                     self.first_timestamp = PGConnector.now()
             except Exception as e:
                 self.logger.error(
-                    'Error closing connection for session {}\n{}'.format(session_id, e))
+                    'Error connecting to PG for session {}\n{}'.format(session_id, e))
                 self.metrics.measure(PostgresErrorsMeasurement(self.db_name, 'ConnectionError'))
                 return False
             finally:
@@ -95,7 +96,7 @@ class PGConnector:
         finally:
             end = datetime.now()
             self.metrics.measure(PostgresLatencyMeasurement(
-                self.db_name, 'Query', (end-start).total_seconds()))
+                self.db_name, 'Query', (end-start).total_seconds() * 1000))
         return True
 
     def _can_ignore_error(self):

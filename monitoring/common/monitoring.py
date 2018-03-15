@@ -30,9 +30,10 @@ import Queue
 import socket
 import threading
 import time
-import urllib
+import urllib2
 
 BUFFER_SIZE = 500
+FLUSH_SIZE = 100
 FLUSH_TIME = 4
 RETRY_COUNT = 2
 TIMEOUT = 4
@@ -78,9 +79,9 @@ class InfluxDBBackendThread(threading.Thread):
             return True
         if retries < 0:
             return False
-        self._logger.info('Trying to log to server, retries: %d', retries)
+        self._logger.debug('Trying to log to server, retries: %d', retries)
         try:
-            urllib.urlopen(self.endpoint, data, TIMEOUT)
+            urllib2.urlopen(self.endpoint, data, TIMEOUT)
             return True
         except socket.timeout:
             self._logger.error('Socket timed out.')
@@ -94,13 +95,13 @@ class InfluxDBBackendThread(threading.Thread):
         last_write = time.time()
         while True:
             try:
-                while len(points) < BUFFER_SIZE:
+                while len(points) < FLUSH_SIZE:
                     wait = max(0, time.time() - last_write)
                     points.append(self.queue.get(True, wait))
             except Queue.Empty:
                 pass
             now = time.time()
-            if len(points) >= BUFFER_SIZE or now >= last_write + FLUSH_TIME:
+            if len(points) >= FLUSH_SIZE or now >= last_write + FLUSH_TIME:
                 binary_data = ''.join(points).encode('utf-8')
                 success = self._write(binary_data)
                 if not success:
@@ -131,9 +132,9 @@ class InfluxDBBackend(object):
         self._logger = logging.getLogger(__name__)
         endpoint = 'http://{}-influxdb:8086/write?db={}&u={}&p={}&precision=n'.format(
             environment,
-            urllib.quote(database),
-            urllib.quote(username),
-            urllib.quote(password)
+            urllib2.quote(database),
+            urllib2.quote(username),
+            urllib2.quote(password)
         )
         self._logger.info('Endpoint info: %s', endpoint)
         self._queue = multiprocessing.Queue(BUFFER_SIZE)
@@ -145,7 +146,7 @@ class InfluxDBBackend(object):
         try:
             self._queue.put_nowait(point)
         except Queue.Full:
-            logging.warning('Failed to record metric data point: queue full')
+            self._logger.warn('Failed to record metric data point: queue full')
 
     def close(self):
         """Stop the flushing thread and wait for all points to be flushed"""

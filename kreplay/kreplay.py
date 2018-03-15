@@ -181,7 +181,6 @@ class KReplay:
             kafka_brokers=None,
             db_name='postgres',
             db_user='postgres',
-            db_pass='',
             db_host='localhost',
             db_port=5432,
             skip_selects=True,
@@ -198,7 +197,7 @@ class KReplay:
         self.after = after
         self.kafka_receiver = KafkaReceiver(metrics, topic, kafka_brokers)
         self.pg_connector = PGConnector(metrics=metrics, db_name=db_name, db_user=db_user,
-                                        db_pass=db_pass, db_host=db_host, db_port=db_port,
+                                        db_host=db_host, db_port=db_port,
                                         ignore_error_seconds=ignore_error_seconds)
 
         self.processors = {}  # hash: partition => PartitionProcessor
@@ -249,7 +248,7 @@ class KReplay:
                 if processor.can_commit():
                     offset = processor.get_last_seen_offset()
                     if offset != self.committed_offsets[partition]:
-                        self.logger.debug(
+                        self.logger.info(
                             'Committing offset {} for partition {}'.format(offset, partition))
                         self.kafka_receiver.commit(partition, offset)
                         self.committed_offsets[partition] = offset
