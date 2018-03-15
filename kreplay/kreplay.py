@@ -27,17 +27,20 @@ class _PartitionProcessor:
             pg_connector,
             skip_selects,
             session_timeout_ms,
-            after):
+            after,
+            skip_count):
         self.metrics = metrics
         self.replay_commands = ['INSERT', 'DELETE', 'UPDATE', 'BREAK', 'COMMIT', 'ROLLBACK']
         self.pg_connector = pg_connector
         self.skip_selects = skip_selects
         self.session_timeout_ms = session_timeout_ms
         self.after = after
+        self.skip_count = skip_count
 
         self.session_timestamps = {}  # hash: session_id => timestamp of first statement
         self.last_seen_offset = None
         self.logger = logging.getLogger(__name__)
+        self.message_count = 0  # used for implementing skip
 
     @staticmethod
     def is_valid_pg_message(pg_msg):
@@ -87,9 +90,11 @@ class _PartitionProcessor:
             # always pass through un-parse-able date time
             parsed_log_time = sys.maxint
 
+        self.message_count += 1
+
         # enabled replay of logs after the timestamp self.after 
         # replay the DML commands and select command if skip selects is not true
-        return (parsed_log_time >= self.after) and (
+        return self.message_count > self.skip_count and parsed_log_time >= self.after and (
                     (command_tag in ['SELECT', 'BIND', 'PARSE'] and not self.skip_selects) or
                     (command_tag in self.replay_commands)
                 )
@@ -186,7 +191,8 @@ class KReplay:
             skip_selects=True,
             session_timeout_ms=60000,
             after=0,
-            ignore_error_seconds=0):
+            ignore_error_seconds=0,
+            skip_count=0):
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
         self.terminate = False
@@ -195,6 +201,7 @@ class KReplay:
         self.skip_selects = skip_selects
         self.session_timeout_ms = session_timeout_ms
         self.after = after
+        self.skip_count = skip_count
         self.kafka_receiver = KafkaReceiver(metrics, topic, kafka_brokers)
         self.pg_connector = PGConnector(metrics=metrics, db_name=db_name, db_user=db_user,
                                         db_host=db_host, db_port=db_port,
@@ -235,7 +242,8 @@ class KReplay:
                         self.pg_connector,
                         self.skip_selects,
                         self.session_timeout_ms,
-                        self.after
+                        self.after,
+                        self.skip_count,
                     )
                     self.committed_offsets[record.partition] = 0
                 if not self.processors[record.partition].process(record):

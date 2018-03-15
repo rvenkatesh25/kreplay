@@ -8,7 +8,6 @@ class KafkaErrorsMeasurement(object):
     def __init__(self, topic, error_type):
         self.topic = topic
         self.error_type = error_type
-        self.count = 1
 
 
 class KafkaConsumerLatencyMeasurement(object):
@@ -26,7 +25,6 @@ class PostgresErrorsMeasurement(object):
     def __init__(self, database, error_type):
         self.database = database
         self.error_type = error_type
-        self.count = 1
 
 
 class PostgresLatencyMeasurement(object):

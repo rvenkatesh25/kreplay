@@ -62,6 +62,9 @@ if __name__ == '__main__':
                              ' a few seconds duplicate key sort of errors should be ignored.'
                              'Setting to -1 tolerates errors forever. '
                              'Setting to 0 fails on any error')
+    parser.add_argument('-c', '--skip-count', default=0,
+                        help='Skip this many kafka messages before replay. Useful when recovering '
+                             'from un-replay-able queries')
 
     args = parser.parse_args()
 
@@ -86,6 +89,8 @@ if __name__ == '__main__':
         args.replay_after
     ignore_error_seconds = int(os.getenv('ignoreErrorSeconds')) if os.getenv(
         'ignoreErrorSeconds') is not None else args.ignore_error_seconds
+    skip_count = int(os.getenv('skipCount')) if os.getenv(
+        'skipCount') is not None else args.skip_count
 
     # spawn a background thread for health checks
     hc_thread = Thread(target=health_check, args=())
@@ -107,6 +112,7 @@ if __name__ == '__main__':
         session_timeout_ms=timeout_ms,
         after=replay_after,
         ignore_error_seconds=ignore_error_seconds,
+        skip_count=skip_count,
     )
     error = app.run()
     if error:

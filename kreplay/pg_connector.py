@@ -58,6 +58,9 @@ class PGConnector:
             session_id (str): session id to identify the connection
             statement (str): pg statement to be replayed
         """
+        if not statement:
+            return True
+
         if session_id not in self.connections or self.connections[session_id] is None:
             start = datetime.now()
             try:
@@ -76,8 +79,8 @@ class PGConnector:
                     self.db_name, 'Connect', (end-start).total_seconds()))
 
         start = datetime.now()
+        query = PGConnector.cleanup_statement(statement)
         try:
-            query = PGConnector.cleanup_statement(statement)
             self.logger.info('Will replay query: {} w/ session {}'.format(query, session_id))
 
             self._execute(session_id, query)
@@ -85,11 +88,11 @@ class PGConnector:
         except Exception as e:
             if isinstance(e, psycopg2.IntegrityError) and self._can_ignore_error():
                 self.logger.warn(
-                    'SKIPPING: Statement violates constraint: {}\n{}'.format(statement, e))
+                    'SKIPPING: Statement violates constraint: {}\n{}'.format(query, e))
                 self.metrics.measure(PostgresErrorsMeasurement(self.db_name, 'SkipIntegrityError'))
             else:
-                self.logger.error('Error executing statement: {}\n{}: {}'.format(
-                    statement, type(e).__name__, e))
+                self.logger.error('Error executing query: {}. {}: {}'.format(
+                    query, type(e).__name__, e))
                 self.metrics.measure(PostgresErrorsMeasurement(self.db_name, 'QueryError'))
                 self._close(session_id)
                 return False
@@ -101,7 +104,8 @@ class PGConnector:
 
     def _can_ignore_error(self):
         """Ignore errors for specified number of seconds"""
-        return PGConnector.now() - self.first_timestamp < self.ignore_error_seconds
+        return self.ignore_error_seconds == -1 or \
+            PGConnector.now() - self.first_timestamp < self.ignore_error_seconds
 
     @staticmethod
     def now():
